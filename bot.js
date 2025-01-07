@@ -1,5 +1,5 @@
 import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
-import QRCode from 'qrcode-terminal'; // Importe o QRCode para gerar no terminal
+import QRCode from 'qrcode-terminal';
 import { Boom } from '@hapi/boom';
 import moment from 'moment-timezone';
 import NodeCache from 'node-cache';
@@ -8,10 +8,15 @@ import fs from 'fs';
 moment.tz.setDefault('America/Sao_Paulo');
 
 const cacheTentativasEnvio = new NodeCache();
-const intervaloEnvio = 5 * 60 * 60 * 1000; // 5 horas em milissegundos
-let ultimaMensagemEnviadaPorJid = {};  // Armazenar o último envio por Jid (grupo ou privado)
+const intervaloEnvio = 5 * 60 * 60 * 1000;
+let ultimaMensagemEnviadaPorJid = {};
+const authInfoPath = 'auth_info';
+const linksColetadosPath = 'links_coletados.json';
 
-const authInfoPath = 'auth_info'; // Caminho onde as credenciais são salvas
+let linksColetados = [];
+if (fs.existsSync(linksColetadosPath)) {
+    linksColetados = JSON.parse(fs.readFileSync(linksColetadosPath));
+}
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(authInfoPath);
@@ -24,12 +29,10 @@ async function connectToWhatsApp() {
 
     socket.ev.on('creds.update', saveCreds);
 
-    // Evento para exibir o QR Code
     socket.ev.on('connection.update', (update) => {
         const { qr, connection, lastDisconnect } = update;
 
         if (qr) {
-            // Exibe o QR Code no console para nova conexão
             QRCode.generate(qr, { small: true }, (qrcode) => {
                 console.log("Escaneie o QR Code para conectar:\n" + qrcode);
             });
@@ -41,10 +44,10 @@ async function connectToWhatsApp() {
                 if (error === 401) {
                     console.log('Erro de autenticação. Excluindo "auth_info" e tentando novamente...');
                     excluirAuthInfo();
-                    connectToWhatsApp();  // Reconectar automaticamente após excluir as credenciais
+                    connectToWhatsApp();
                 } else {
                     console.log('Reconectando ao WhatsApp...');
-                    connectToWhatsApp();  // Reconectar automaticamente
+                    connectToWhatsApp();
                 }
             }
         }
@@ -54,18 +57,41 @@ async function connectToWhatsApp() {
         }
     });
 
-    // Escutar por mensagens e responder com a saudação
     socket.ev.on('messages.upsert', async (messageUpdate) => {
         try {
             const { messages } = messageUpdate;
             if (!messages || messages.length === 0) return;
 
             const message = messages[0];
-            const jid = message.key.remoteJid;  // ID do grupo ou do contato
+            const jid = message.key.remoteJid;
 
             const agora = Date.now();
 
-            // Verifica se já passaram 5 horas desde o último envio para esse Jid
+            // Verificar comando !links
+            if (message.message?.conversation?.toLowerCase() === '!links') {
+                const resposta = linksColetados.length > 0
+                    ? `Links coletados:\n${linksColetados.join('\n')}`
+                    : 'Nenhum link coletado ainda.';
+                await socket.sendMessage(jid, { text: resposta });
+                return;
+            }
+
+            // Coletar links enviados
+            const texto = message.message?.conversation;
+            if (texto && texto.includes('https://chat.whatsapp.com')) {
+                const linksEncontrados = texto.match(/https:\/\/chat\.whatsapp\.com\/\S+/g);
+                if (linksEncontrados) {
+                    for (const link of linksEncontrados) {
+                        if (!linksColetados.includes(link)) {
+                            linksColetados.push(link);
+                            fs.writeFileSync(linksColetadosPath, JSON.stringify(linksColetados, null, 2));
+                            console.log(`Novo link coletado: ${link}`);
+                        }
+                    }
+                }
+            }
+
+            // Verificar intervalo de envio da saudação
             if (ultimaMensagemEnviadaPorJid[jid] && agora - ultimaMensagemEnviadaPorJid[jid] < intervaloEnvio) {
                 console.log(`Já enviamos a saudação recentemente para ${jid}. Aguardando 5 horas para o próximo envio.`);
                 return;
@@ -87,11 +113,9 @@ Façam Seus Pedidos 😍💍
 
 WhatsApp: https://wa.me/5511946805835`;
 
-            // Enviar a saudação para o grupo ou contato
             await socket.sendMessage(jid, { text: saudacao });
             console.log(`Mensagem de saudação enviada para ${jid}.`);
 
-            // Atualiza a última hora de envio para esse Jid
             ultimaMensagemEnviadaPorJid[jid] = agora;
 
         } catch (error) {
@@ -102,7 +126,7 @@ WhatsApp: https://wa.me/5511946805835`;
 
 async function enviarMensagemPromocional(socket) {
     const agora = Date.now();
-    
+
     try {
         console.log('Buscando grupos...');
         const grupos = await socket.groupFetchAllParticipating();
@@ -129,7 +153,6 @@ Façam Seus Pedidos 😍💍
 
 WhatsApp: https://wa.me/5511946805835`;
 
-        // Enviar a mensagem para os grupos
         for (const idGrupo in grupos) {
             try {
                 const grupo = grupos[idGrupo];
