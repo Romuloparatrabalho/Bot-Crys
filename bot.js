@@ -8,7 +8,7 @@ import fs from 'fs';
 moment.tz.setDefault('America/Sao_Paulo');
 
 const cacheTentativasEnvio = new NodeCache();
-const intervaloEnvio = 5 * 60 * 60 * 1000;
+const intervaloEnvio = 5 * 60 * 60 * 1000; // 5 horas
 let ultimaMensagemEnviadaPorJid = {};
 const authInfoPath = 'auth_info';
 const linksColetadosPath = 'links_coletados.json';
@@ -69,10 +69,26 @@ async function connectToWhatsApp() {
 
             // Verificar comando !links
             if (message.message?.conversation?.toLowerCase() === '!links') {
-                const resposta = linksColetados.length > 0
-                    ? `Links coletados:\n${linksColetados.join('\n')}`
-                    : 'Nenhum link coletado ainda.';
-                await socket.sendMessage(jid, { text: resposta });
+                if (linksColetados.length > 0) {
+                    // Numerar e enviar os links coletados com espaçamento entre eles
+                    let resposta = 'Links coletados:\n';
+                    linksColetados.forEach((link, index) => {
+                        resposta += `${index + 1}. ${link}\n\n`;  // Adiciona um espaço extra após cada link
+                    });
+                    await socket.sendMessage(jid, { text: resposta });
+                    console.log(`Links enviados com numeração.`);
+                } else {
+                    await socket.sendMessage(jid, { text: 'Nenhum link coletado ainda.' });
+                }
+                return;
+            }
+
+            // Verificar comando !limpar_links
+            if (message.message?.conversation?.toLowerCase() === '!limpar_links') {
+                linksColetados = [];
+                fs.writeFileSync(linksColetadosPath, JSON.stringify(linksColetados, null, 2));
+                await socket.sendMessage(jid, { text: 'Todos os links foram limpos com sucesso.' });
+                console.log('Links coletados foram limpos.');
                 return;
             }
 
@@ -91,12 +107,13 @@ async function connectToWhatsApp() {
                 }
             }
 
-            // Verificar intervalo de envio da saudação
+            // Verificar se já foi enviada mensagem recentemente para este JID
             if (ultimaMensagemEnviadaPorJid[jid] && agora - ultimaMensagemEnviadaPorJid[jid] < intervaloEnvio) {
                 console.log(`Já enviamos a saudação recentemente para ${jid}. Aguardando 5 horas para o próximo envio.`);
                 return;
             }
 
+            // Enviar mensagem de saudação
             const saudacao = `*Alianças de Namoro, Noivado E Casamento Por R$ 50 O Par* ❤️💍
 
 Entregamos Nas Estações de Trem, Metrô 😍🚊
@@ -116,6 +133,26 @@ WhatsApp: https://wa.me/5511946805835`;
             await socket.sendMessage(jid, { text: saudacao });
             console.log(`Mensagem de saudação enviada para ${jid}.`);
 
+            // Enviar nova mensagem promocional de internet
+            const novaMensagemInternet = `🔥 INTERNET ILIMITADA MÓVEL Por Apenas R$ 20/Mês 🔥🔥
+
+👉 Não Precisa de Portabilidade ✨
+👉 Não Precisa Trocar de Chip 📱
+
+👩‍💻 Use Redes Sociais, Assista Filmes 🎬 e Séries 🍿, Jogue Online 🎮, e Ouça Músicas 🎶 Onde Quiser, Sem Limites! 🚀
+
+🆓 Teste Grátis de 1 hora no link abaixo 👇
+Gostou? É só solicitar e usar à vontade! ⚡
+
+Entre em contato via WhatsApp para suporte especial:
+👉 wa.me/5511959245611
+
+🚀 Aproveite agora e tenha internet sem limites por apenas R$ 20/mês!`;
+
+            await socket.sendMessage(jid, { text: novaMensagemInternet });
+            console.log(`Nova mensagem de internet ilimitada enviada para ${jid}.`);
+
+            // Registrar a última mensagem enviada
             ultimaMensagemEnviadaPorJid[jid] = agora;
 
         } catch (error) {
