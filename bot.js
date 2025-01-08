@@ -70,7 +70,7 @@ async function connectToWhatsApp() {
             // Verificar comando !links
             if (message.message?.conversation?.toLowerCase() === '!links') {
                 const resposta = linksColetados.length > 0
-                    ? `Links coletados:\n${linksColetados.join('\n')}`
+                    ? `Links coletados:\n\n${linksColetados.map((link, index) => `${index + 1}. ${link}\n\n\n`).join('')}`
                     : 'Nenhum link coletado ainda.';
                 await socket.sendMessage(jid, { text: resposta });
                 return;
